@@ -4,20 +4,31 @@
 #define PIN D2
 
 //define modes for LEDs
-#define COLOR_WHEEL_BLUE blue
-#define COLOR_WHEEL_GREEN green
-#define COLOR_WHEEL_RED red
-#define RAINBOW rainbow
+const uint8_t OFF = 0;
+const uint8_t COLOR_WIPE_BLUE = 1;
+const uint8_t COLOR_WIPE_GREEN = 2;
+const uint8_t COLOR_WIPE_RED = 3;
+const uint8_t RAINBOW = 4;
+const uint8_t RAINBOW_CYCLE = 5;
+const uint8_t THEATER_CHASE_WHITE = 6;
+const uint8_t THEATER_CHASE_RED = 7;
+const uint8_t THEATER_CHASE_GREEN = 8;
+
+//store current mode
+uint8_t MODE = OFF;
+boolean isOff = true;
+
+//WiFi password
+const char WiFiAPPSK[] = "christmas";
 
 WiFiServer server(80); //Initialize the server on port 80
 
-//ssid and password for WiFi network
-const char* ssid = "Fios-OKAZD";
-const char* password = "jet5036fade34rick";
-
-//constants for HTTP responses
-const String responseHeader = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE HTML>\r\n<html>";
-const String responseFooter = "</html>\n";
+//constants for JSON responses
+const String responseHeader = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"data\": {";
+const String responseFooter = "\r\n}\r\n}\n";
+const String successStatus = "\r\n\"status\":\"success\",\n";
+const String failureStatus = "\r\n\"status\":\"failure\",\n";
+const String invalidRequestMessage = "\"message\":\"Invalid request.\"";
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = Arduino pin number (most are valid)
@@ -38,40 +49,78 @@ void setup() {
   //setup for WiFiServer
   Serial.begin(115200);
   delay(10);
-  setupWiFiServer();
+  setupWiFi();
 
   //setup for LED strip
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
 }
 
-void setupWiFiServer() {
-  // Connect to WiFi network
-  Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  
-  WiFi.begin(ssid, password);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("WiFi connected");
-  
-  // Start the server
-  server.begin();
-  Serial.println("Server started");
+void setupWiFi() {
+  WiFi.mode(WIFI_AP);
 
-  // Print the IP address
-  Serial.println(WiFi.localIP());
+  // Do a little work to get a unique-ish name. Append the
+  // last two bytes of the MAC (HEX'd) to "Thing-":
+  uint8_t mac[WL_MAC_ADDR_LENGTH];
+  WiFi.softAPmacAddress(mac);
+  String macID = String(mac[WL_MAC_ADDR_LENGTH - 2], HEX) +
+                 String(mac[WL_MAC_ADDR_LENGTH - 1], HEX);
+  macID.toUpperCase();
+  String AP_NameString = "LED TREE " + macID;
+
+  char AP_NameChar[AP_NameString.length() + 1];
+  memset(AP_NameChar, 0, AP_NameString.length() + 1);
+
+  for (int i=0; i<AP_NameString.length(); i++)
+    AP_NameChar[i] = AP_NameString.charAt(i);
+
+  WiFi.softAP(AP_NameChar, WiFiAPPSK);
+  server.begin();
 }
 
 void loop() {
   handleHTTPRequest();
-  switch
+  switch (MODE) {
+    case OFF:
+      off();
+      isOff = true;
+      off();
+      break;
+    case COLOR_WIPE_BLUE:
+      isOff = false;
+      colorWipe(strip.Color(0, 0, 255), 50);
+      break;
+    case COLOR_WIPE_GREEN:
+      isOff = false;
+      colorWipe(strip.Color(0, 255, 0), 50);
+      break;
+    case COLOR_WIPE_RED:
+      isOff = false;
+      colorWipe(strip.Color(255, 0, 0), 50);
+      break;
+    case RAINBOW:
+      isOff = false;
+      rainbow(20);
+      break;
+    case RAINBOW_CYCLE:
+      isOff = false;
+      rainbowCycle(5);
+      break;
+    case THEATER_CHASE_WHITE:
+      isOff = false;
+      theaterChase(strip.Color(127, 127, 127), 50);
+      break;
+    case THEATER_CHASE_RED:
+      isOff = false;
+      theaterChase(strip.Color(127, 0, 0), 50);
+      break;
+    case THEATER_CHASE_GREEN:
+      isOff = false;
+      theaterChase(strip.Color(0, 127, 0), 50);
+      break;
+    default:
+      break;
+  }
 }
 
 void handleHTTPRequest() {
@@ -92,34 +141,57 @@ void handleHTTPRequest() {
   client.flush();
 
   String validResponse;
-  String errorResponse = responseHeader + "\r\nInvalid request. Valid requests are: \n"
-      + "<serverIP>/mode/colorWipe/blue\n"
-      + "<serverIP>/mode/colorWipe/green\n"
-      + "<serverIP>/mode/colorWipe/red\n" 
-      + "<serverIP/mode/rainbow\n"
+  String errorResponse = responseHeader + failureStatus + invalidRequestMessage
       + responseFooter;
   //evaluate the request
-  if (request.indexOf("/mode/colorWipe") != -1) {
+  if (request.indexOf("/mode/off") != -1) {
+    validResponse = successStatus + "\"message\":\"Mode changed to off.\"";
+    MODE = OFF;
+  } else if (request.indexOf("/mode/colorWipe") != -1) {
     //change the mode to color wipe
     //check for color
     if (request.indexOf("/blue") != -1) {
-      validResponse = "\r\nMode changed to colorWipe/blue\n";
-    } else if (request.indexOf("/green")) { 
-      validResponse = "\r\nMode changed to colorWipe/green\n";
-    } else if (request.indexOf("/red")) { 
-      validResponse = "\r\nMode changed to colorWipe/red\n";
+      validResponse = successStatus + "\"message\":\"Mode changed to colorWipe/blue\"";
+      MODE = COLOR_WIPE_BLUE;
+    } else if (request.indexOf("/green") != -1) { 
+      validResponse = successStatus + "\"message\":\"Mode changed to colorWipe/green\"";
+      MODE = COLOR_WIPE_GREEN;
+    } else if (request.indexOf("/red") != -1) { 
+      validResponse = successStatus + "\"message\":\"Mode changed to colorWipe/red\"";
+      MODE = COLOR_WIPE_RED;
     } else {
       client.print(errorResponse);
       delay(1);
       client.stop();
       return;
     }
-  } 
-  else if (request.indexOf("/mode/rainbow") != -1) {
+  } else if (request.indexOf("/mode/rainbow") != -1 
+        && request.indexOf("/mode/rainbowCycle") == -1) {
     //change the mode to static rainbow
-    validResponse = "\r\nMode changed to rainbow\n";
-  }
-  else {
+    validResponse = successStatus + "\"message\":\"Mode changed to rainbow\"";
+    MODE = RAINBOW;
+  } else if (request.indexOf("/mode/rainbowCycle") != -1) {
+    validResponse = successStatus + "\"message\":\"Mode changed to rainbowCycle\"";
+    MODE = RAINBOW_CYCLE;
+  } else if (request.indexOf("/mode/theaterChase") != -1) {
+     //change mode to theater chase
+     //check for color
+     if (request.indexOf("/white") != -1) {
+      validResponse = successStatus + "\"message\":\"Mode changed to theaterChase/white\"";
+      MODE = THEATER_CHASE_WHITE;
+    } else if (request.indexOf("/green") != -1) { 
+      validResponse = successStatus + "\"message\":\"Mode changed to theaterChase/green\"";
+      MODE = THEATER_CHASE_GREEN;
+    } else if (request.indexOf("/red") != -1) { 
+      validResponse = successStatus + "\"message\":\"Mode changed to theaterChase/red\"";
+      MODE = THEATER_CHASE_RED;
+    } else {
+      client.print(errorResponse);
+      delay(1);
+      client.stop();
+      return;
+    }
+  } else {
     //invalid request - send back response indicating valid requests
     client.print(errorResponse);
     delay(1);
@@ -139,13 +211,22 @@ void handleHTTPRequest() {
 }
 
 void off() {
-  
+  if (!isOff) {
+    colorWipe(strip.Color(255, 0, 0), 50);
+    strip.show();
+    strip.show();
+  }
 }
 
 // Fill the dots one after the other with a color
 void colorWipe(uint32_t c, uint8_t wait) {
   for (uint16_t i = 0; i < strip.numPixels(); i++) {
     strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+  }
+  for (uint16_t i = 0; i < strip.numPixels(); i++) {
+    strip.setPixelColor(i, strip.Color(0 ,0 , 0));
     strip.show();
     delay(wait);
   }
@@ -182,24 +263,6 @@ void theaterChase(uint32_t c, uint8_t wait) {
     for (int q=0; q < 3; q++) {
       for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
         strip.setPixelColor(i+q, c);    //turn every third pixel on
-      }
-      strip.show();
-
-      delay(wait);
-
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
-      }
-    }
-  }
-}
-
-//Theatre-style crawling lights with rainbow effect
-void theaterChaseRainbow(uint8_t wait) {
-  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
-    for (int q=0; q < 3; q++) {
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
       }
       strip.show();
 
